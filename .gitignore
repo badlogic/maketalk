@@ -1,0 +1,8 @@
+node_modules/
+generated/
+*.mp4
+*.mov
+*.wav
+*.html
+title_cards.json
+preview_title_card.html
