@@ -7,17 +7,21 @@ A command-line tool to create professional video presentations with title cards 
 - Convert MOV files to MP4 with automatic dimension normalization
 - Standalone EBU R128 loudness normalization for any video file
 - Merge multi-part video sections
-- Extract and transcribe audio using YakD
+- Extract and transcribe audio using Yakety
 - Generate beautiful title cards with customizable design
 - Create final presentation video with title cards and content
 
 ## Prerequisites
 
+### Required:
 - Node.js 14+
 - FFmpeg
 - jq
 - Chrome/Chromium (for title card generation)
-- Yakety transcribe tool (or set `YAKETY_TRANSCRIBE_PATH` environment variable)
+
+### Optional:
+- Yakety transcribe tool for automatic transcription (or set `YAKD_TRANSCRIBE_PATH` environment variable)
+  - Without Yakety, maketalk will generate a template for manual title editing
 
 ## Installation
 
@@ -33,7 +37,7 @@ npx maketalk
 
 ## Usage
 
-### Basic workflow:
+### Basic workflow (with Yakety transcription):
 
 1. Place your MOV files in a directory (name them with format: `01-intro.mov`, `02-section.mov`, etc.)
 
@@ -45,6 +49,26 @@ npx maketalk
 3. Follow the prompts to generate transcriptions and create a prompt for title generation
 
 4. Use claude-danger with the generated prompt to create `title_cards.json`
+
+5. Continue the process:
+   ```bash
+   maketalk --continue
+   ```
+
+### Manual workflow (without Yakety):
+
+1. Place your MOV files in a directory (name them with format: `01-intro.mov`, `02-section.mov`, etc.)
+
+2. Run the tool:
+   ```bash
+   maketalk
+   ```
+
+3. The tool will generate:
+   - `sections.json` - Information about your video sections
+   - `title_cards.json` - Template with placeholder titles
+
+4. Edit `title_cards.json` to add your own titles and descriptions
 
 5. Continue the process:
    ```bash
@@ -75,7 +99,7 @@ maketalk --level-audio video.mp4
 
 ## Environment Variables
 
-- `YAKD_TRANSCRIBE_PATH`: Path to the YakD transcribe binary (default: `/Users/badlogic/workspaces/yakety/build/bin/transcribe`)
+- `YAKD_TRANSCRIBE_PATH`: Path to the Yakety transcribe binary (default: `/Users/badlogic/workspaces/yakety/build/bin/transcribe`)
 
 ## Output
 

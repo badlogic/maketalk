@@ -157,14 +157,16 @@ function checkDependencies() {
   console.log(`${colors.BLUE}Checking dependencies...${colors.NC}`);
 
   const missingDeps = [];
+  let yakdAvailable = true;
 
   if (!commandExists('ffmpeg')) missingDeps.push('ffmpeg');
   if (!commandExists('jq')) missingDeps.push('jq');
 
-  // Check for Yakety transcribe tool - allow custom path via env var
-  const yaketyPath = process.env.YAKETY_TRANSCRIBE_PATH || '/Users/badlogic/workspaces/yakety/build/bin/transcribe';
-  if (!existsSync(yaketyPath)) {
-    missingDeps.push(`yakety transcribe tool (looking at ${yaketyPath})`);
+  // Check for Yakety transcribe tool - optional
+  const yakdPath = process.env.YAKD_TRANSCRIBE_PATH || '/Users/badlogic/workspaces/yakety/build/bin/transcribe';
+  if (!existsSync(yakdPath)) {
+    yakdAvailable = false;
+    console.log(`${colors.YELLOW}Note: Yakety transcribe tool not found - will generate template for manual editing${colors.NC}`);
   }
 
   // Check for Chrome
@@ -177,11 +179,12 @@ function checkDependencies() {
   }
 
   if (missingDeps.length > 0) {
-    console.error(`${colors.RED}Missing dependencies: ${missingDeps.join(', ')}${colors.NC}`);
+    console.error(`${colors.RED}Missing required dependencies: ${missingDeps.join(', ')}${colors.NC}`);
     process.exit(1);
   }
 
-  console.log(`${colors.GREEN}All dependencies found!${colors.NC}`);
+  console.log(`${colors.GREEN}All required dependencies found!${colors.NC}`);
+  return yakdAvailable;
 }
 
 // Get all MOV files in current directory
@@ -222,8 +225,13 @@ async function extractAudio() {
   }
 }
 
-// Step 4: Transcribe audio files
-async function transcribeAudio() {
+// Step 4: Transcribe audio files (if Yakety available)
+async function transcribeAudio(yakdAvailable) {
+  if (!yakdAvailable) {
+    console.log(`\n${colors.YELLOW}Step 4: Skipping transcription (Yakety not available)${colors.NC}`);
+    return false;
+  }
+  
   console.log(`\n${colors.BLUE}Step 4: Transcribing audio files...${colors.NC}`);
 
   const audioDir = path.join(GENERATED_DIR, 'audio');
@@ -252,6 +260,65 @@ async function transcribeAudio() {
       console.log(`${colors.RED}✗ Failed: ${basename}.txt${colors.NC}`);
     }
   }
+}
+
+// Generate template title_cards.json when Yakety is not available
+async function generateTemplateForManualEdit() {
+  console.log(`\n${colors.BLUE}Step 5: Generating template files for manual editing...${colors.NC}`);
+  
+  // Get all section videos
+  const convertedDir = path.join(GENERATED_DIR, 'converted_videos');
+  const mp4Files = await fs.readdir(convertedDir);
+  const sectionFiles = mp4Files.filter(f => f.match(/^\d{2}-section\.mp4$/)).sort();
+  
+  // Generate sections info
+  const sections = [];
+  const titleCards = [];
+  
+  for (const file of sectionFiles) {
+    const sectionNum = file.substring(0, 2);
+    const filename = path.basename(file, '.mp4');
+    
+    sections.push({
+      number: sectionNum,
+      filename: file,
+      duration: "[run 'ffprobe' to get duration]"
+    });
+    
+    titleCards.push({
+      number: sectionNum,
+      title: `Section ${sectionNum} Title`,
+      description: `Description for section ${sectionNum}`
+    });
+  }
+  
+  // Write sections.json
+  const sectionsJson = {
+    sections: sections,
+    note: "This file contains information about your video sections"
+  };
+  await fs.writeFile('sections.json', JSON.stringify(sectionsJson, null, 2));
+  
+  // Write title_cards.json template
+  const titleCardsJson = {
+    title_cards: titleCards,
+    instructions: [
+      "Please edit the title and description for each section",
+      "Keep titles short and punchy (max 6-8 words)",
+      "Keep descriptions concise (max 10-12 words)",
+      "Save this file and run 'maketalk --continue' when done"
+    ]
+  };
+  await fs.writeFile('title_cards.json', JSON.stringify(titleCardsJson, null, 2));
+  
+  console.log(`\n${colors.GREEN}✓ Created template files:${colors.NC}`);
+  console.log(`   - sections.json (for reference)`);
+  console.log(`   - title_cards.json (please edit this)`);
+  console.log(`\n${colors.YELLOW}Next steps:${colors.NC}`);
+  console.log(`1. Edit title_cards.json with your section titles and descriptions`);
+  console.log(`2. Run: maketalk --continue`);
+  console.log(`\n${colors.BLUE}Tip:${colors.NC} You can preview title cards before finalizing:`);
+  console.log(`   maketalk --preview 01 "Your Title" "Your Description"`);
 }
 
 // Step 5: Generate claude-danger prompt
@@ -1089,21 +1156,26 @@ async function main() {
   if (continueMode) {
     if (!existsSync('title_cards.json')) {
       console.error(`${colors.RED}Error: title_cards.json not found!${colors.NC}`);
-      console.log('Please run claude-danger first with the generated prompt.');
+      console.log('Please create title_cards.json first by:');
+      console.log('1. Running maketalk to generate the template');
+      console.log('2. Editing the titles and descriptions');
+      console.log('3. Running maketalk --continue');
       process.exit(1);
     }
 
-    checkDependencies();
+    const yakdAvailable = checkDependencies();
     await generateTitleCards();
     await createFinalVideo();
   } else {
     // Full run
-    checkDependencies();
+    const yakdAvailable = checkDependencies();
     await convertVideos();  // Step 1: Convert with dimension fix
     await mergeMultipartSections();  // Step 2: Merge multi-part sections
-    await extractAudio();  // Step 3: Extract audio from merged sections only
-    await transcribeAudio();  // Step 4: Transcribe
-    const skipPrompt = await generateClaudePrompt();  // Step 5: Generate prompt
+    
+    if (yakdAvailable) {
+      await extractAudio();  // Step 3: Extract audio from merged sections only
+      await transcribeAudio(yakdAvailable);  // Step 4: Transcribe
+      const skipPrompt = await generateClaudePrompt();  // Step 5: Generate prompt
 
     if (skipPrompt === true) {
       // User chose to use existing title_cards.json
@@ -1115,7 +1187,11 @@ async function main() {
       console.log(`2. Copy and paste the contents of ${GENERATED_DIR}/claude_prompt.txt`);
       console.log('3. Work with Claude to refine the titles');
       console.log('4. Have Claude save the results to title_cards.json');
-      console.log('5. Run: node create_video_presentation.js --continue');
+      console.log('5. Run: maketalk --continue');
+    }
+    } else {
+      // Yakety not available - generate template
+      await generateTemplateForManualEdit();
     }
   }
 }
