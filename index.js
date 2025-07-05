@@ -731,13 +731,19 @@ async function generateTitleCards() {
         '-loop', '1',
         '-i', pngPath,
         '-f', 'lavfi',
-        '-i', 'anullsrc=channel_layout=mono:sample_rate=44100',
+        '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
         '-c:v', 'libx264',
         '-t', '5',
         '-pix_fmt', 'yuv420p',
-        '-r', '60',
+        '-r', '30',  // 30fps for YouTube compatibility
+        '-crf', '18',  // Better quality for text
+        '-bf', '2',  // Maximum 2 B-frames
+        '-flags', '+cgop',  // Closed GOP
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', '192k',  // Higher bitrate
+        '-ac', '2',  // Stereo
+        '-ar', '48000',  // 48kHz
+        '-movflags', 'faststart',  // Fast start
         '-shortest',
         '-y',
         mp4Path
@@ -851,12 +857,18 @@ async function convertVideos() {
       }
 
       args.push(
+        '-r', '30',  // Force 30fps for YouTube compatibility
         '-c:v', 'libx264',
-        '-crf', '23',
-        '-af', 'pan=mono|c0=c0',  // Convert to mono from left channel
+        '-crf', '18',  // Better quality for text clarity
+        '-bf', '2',  // Maximum 2 B-frames for YouTube
+        '-flags', '+cgop',  // Closed GOP for YouTube
+        '-pix_fmt', 'yuv420p',  // Ensure compatible pixel format
+        '-af', 'pan=stereo|c0=c0|c1=c0,aresample=48000',  // Convert to stereo and 48kHz
         '-c:a', 'aac',
-        '-b:a', '128k',
-        '-ac', '1',
+        '-b:a', '192k',  // Higher bitrate for better audio
+        '-ac', '2',  // Stereo audio
+        '-ar', '48000',  // 48kHz sample rate for YouTube
+        '-movflags', 'faststart',  // MOOV atom at front for streaming
         '-y',
         outputPath
       );
