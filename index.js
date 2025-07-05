@@ -152,6 +152,44 @@ async function initGeneratedDir() {
   }
 }
 
+// Clean up generated directories except converted_videos for resume
+async function cleanupForResume() {
+  console.log(`${colors.BLUE}Cleaning up for resume (keeping converted videos)...${colors.NC}`);
+  
+  const dirsToClean = [
+    path.join(GENERATED_DIR, 'audio'),
+    path.join(GENERATED_DIR, 'transcriptions'),
+    path.join(GENERATED_DIR, 'title_cards')
+  ];
+  
+  for (const dir of dirsToClean) {
+    try {
+      // Remove directory and all contents
+      await fs.rm(dir, { recursive: true, force: true });
+      // Recreate empty directory
+      await fs.mkdir(dir, { recursive: true });
+    } catch (error) {
+      // Directory might not exist, that's ok
+    }
+  }
+  
+  // Clean up any files in the root generated directory
+  try {
+    const files = await fs.readdir(GENERATED_DIR);
+    for (const file of files) {
+      const filePath = path.join(GENERATED_DIR, file);
+      const stat = await fs.stat(filePath);
+      if (!stat.isDirectory()) {
+        await fs.unlink(filePath);
+      }
+    }
+  } catch (error) {
+    // Ignore errors
+  }
+  
+  console.log(`${colors.GREEN}✓ Cleanup complete${colors.NC}`);
+}
+
 // Check dependencies
 function checkDependencies() {
   console.log(`${colors.BLUE}Checking dependencies...${colors.NC}`);
@@ -191,6 +229,22 @@ function checkDependencies() {
 async function getMovFiles() {
   const files = await fs.readdir('.');
   return files.filter(f => f.toLowerCase().endsWith('.mov'));
+}
+
+// Check if MOV files follow naming convention
+function checkMovFileNaming(movFiles) {
+  const numberedFiles = [];
+  const unnumberedFiles = [];
+  
+  for (const file of movFiles) {
+    if (file.match(/^(\d{2})-/)) {
+      numberedFiles.push(file);
+    } else {
+      unnumberedFiles.push(file);
+    }
+  }
+  
+  return { numberedFiles, unnumberedFiles };
 }
 
 // Step 3: Extract audio from merged section MP4 files
@@ -890,6 +944,7 @@ async function mergeMultipartSections() {
 
   // Group files by section number
   const sections = {};
+  
   for (const file of files) {
     const match = file.match(/^(\d{2})-/);
     if (match) {
@@ -1118,11 +1173,13 @@ async function main() {
     console.log('  maketalk --level-audio <file>');
     console.log('\nOptions:');
     console.log('  --continue                Continue from claude-danger step');
+    console.log('  --resume-after-conversion Resume after MOV to MP4 conversion');
     console.log('  --level-audio <file>      Level audio of a single file (standalone operation)');
     console.log('  --preview                 Preview a title card');
     console.log('  --help, -h                Show this help');
     console.log('\nExamples:');
     console.log('  maketalk                                    # Create video presentation');
+    console.log('  maketalk --resume-after-conversion          # Resume after conversion step');
     console.log('  maketalk --level-audio final.mp4            # Level audio of a file');
     console.log('  maketalk --continue                         # Continue after title generation');
     console.log('  maketalk --preview 01 "Title" "Description" # Preview a title card');
@@ -1160,9 +1217,63 @@ async function main() {
 
   // Parse command line options
   const continueMode = args.includes('--continue');
+  const resumeAfterConversion = args.includes('--resume-after-conversion');
 
   // Initialize generated directory
   await initGeneratedDir();
+
+  // Check if we're resuming after conversion
+  if (resumeAfterConversion) {
+    // Check that converted_videos directory exists and has files
+    const convertedDir = path.join(GENERATED_DIR, 'converted_videos');
+    if (!existsSync(convertedDir)) {
+      console.error(`${colors.RED}Error: No converted videos found at ${convertedDir}${colors.NC}`);
+      console.error('Please run maketalk without --resume-after-conversion first');
+      process.exit(1);
+    }
+    
+    const convertedFiles = await fs.readdir(convertedDir);
+    const mp4Files = convertedFiles.filter(f => f.endsWith('.mp4'));
+    
+    if (mp4Files.length === 0) {
+      console.error(`${colors.RED}Error: No MP4 files found in ${convertedDir}${colors.NC}`);
+      console.error('Please run maketalk without --resume-after-conversion first');
+      process.exit(1);
+    }
+    
+    console.log(`${colors.GREEN}Found ${mp4Files.length} converted video(s)${colors.NC}`);
+    
+    // Clean up other directories
+    await cleanupForResume();
+    
+    // Run steps 2 onwards
+    const yakdAvailable = checkDependencies();
+    await mergeMultipartSections();  // Step 2: Merge multi-part sections
+    
+    if (yakdAvailable) {
+      await extractAudio();  // Step 3: Extract audio from merged sections only
+      await transcribeAudio(yakdAvailable);  // Step 4: Transcribe
+      const skipPrompt = await generateClaudePrompt();  // Step 5: Generate prompt
+
+      if (skipPrompt === true) {
+        // User chose to use existing title_cards.json
+        await generateTitleCards();
+        await createFinalVideo();
+      } else {
+        console.log(`\n${colors.YELLOW}Next steps:${colors.NC}`);
+        console.log('1. Run: claude-danger');
+        console.log(`2. Copy and paste the contents of ${GENERATED_DIR}/claude_prompt.txt`);
+        console.log('3. Work with Claude to refine the titles');
+        console.log('4. Have Claude save the results to title_cards.json');
+        console.log('5. Run: maketalk --continue');
+      }
+    } else {
+      // Yakety not available - generate template
+      await generateTemplateForManualEdit();
+    }
+    
+    return; // Exit after resume flow
+  }
 
   // Check if we're continuing from claude-danger
   if (continueMode) {
@@ -1181,6 +1292,38 @@ async function main() {
   } else {
     // Full run
     const yakdAvailable = checkDependencies();
+    
+    // Check MOV file naming before starting
+    const movFiles = await getMovFiles();
+    if (movFiles.length === 0) {
+      console.error(`${colors.RED}Error: No .mov files found in current directory${colors.NC}`);
+      process.exit(1);
+    }
+    
+    const { numberedFiles, unnumberedFiles } = checkMovFileNaming(movFiles);
+    
+    if (unnumberedFiles.length > 0) {
+      console.error(`\n${colors.RED}Error: MOV files must follow the naming convention: XX-name.mov${colors.NC}`);
+      console.error(`       where XX is a two-digit section number (01, 02, etc.)\n`);
+      console.error(`${colors.YELLOW}Files that need to be renamed:${colors.NC}`);
+      
+      for (const file of unnumberedFiles) {
+        console.error(`  ❌ ${file}`);
+      }
+      
+      console.error(`\n${colors.BLUE}Examples of correct naming:${colors.NC}`);
+      console.error(`  ✓ 01-introduction.mov`);
+      console.error(`  ✓ 02-main-content.mov`);
+      console.error(`  ✓ 03-conclusion.mov`);
+      
+      console.error(`\n${colors.YELLOW}To rename a file, use:${colors.NC}`);
+      console.error(`  mv "${unnumberedFiles[0]}" "01-${unnumberedFiles[0]}"`);
+      
+      process.exit(1);
+    }
+    
+    console.log(`${colors.GREEN}Found ${numberedFiles.length} properly named MOV file(s)${colors.NC}`);
+    
     await convertVideos();  // Step 1: Convert with dimension fix
     await mergeMultipartSections();  // Step 2: Merge multi-part sections
     

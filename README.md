@@ -37,9 +37,20 @@ npx maketalk
 
 ## Usage
 
+### File Naming Requirements
+
+**Important**: MOV files must follow a specific naming convention:
+- Format: `XX-name.mov` where XX is a two-digit section number
+- Examples:
+  - ✅ `01-introduction.mov`
+  - ✅ `02-main-content.mov`
+  - ✅ `03-conclusion.mov`
+  - ❌ `intro.mov` (missing section number)
+  - ❌ `todo-workflow.mov` (missing section number)
+
 ### Basic workflow (with Yakety transcription):
 
-1. Place your MOV files in a directory (name them with format: `01-intro.mov`, `02-section.mov`, etc.)
+1. Place your MOV files in a directory with proper naming (see above)
 
 2. Run the tool:
    ```bash
@@ -57,7 +68,7 @@ npx maketalk
 
 ### Manual workflow (without Yakety):
 
-1. Place your MOV files in a directory (name them with format: `01-intro.mov`, `02-section.mov`, etc.)
+1. Place your MOV files in a directory with proper naming (see above)
 
 2. Run the tool:
    ```bash
@@ -80,6 +91,20 @@ npx maketalk
    maketalk --level-audio final_presentation.mp4
    ```
 
+### Resuming After Conversion
+
+If you need to re-run the process but already have converted videos:
+
+```bash
+# This will keep your converted videos and re-do all subsequent steps
+maketalk --resume-after-conversion
+```
+
+This is useful when:
+- You want to regenerate transcriptions
+- You need to create different title cards
+- Something failed after the conversion step
+
 ### Preview title cards:
 ```bash
 maketalk --preview 01 "Claude Code" "The Future of Programming"
@@ -94,6 +119,7 @@ maketalk --level-audio video.mp4
 ### Command Line Options:
 - `--level-audio <file>`: Apply EBU R128 loudness normalization to a single file (standalone operation)
 - `--continue`: Continue from the claude-danger step after creating title_cards.json
+- `--resume-after-conversion`: Resume processing after MOV to MP4 conversion (keeps converted videos)
 - `--preview <num> <title> <desc>`: Preview a title card design
 - `--help`: Show help information
 
